@@ -254,7 +254,7 @@ For every route, the wrapper:
 
 ### D35. End-to-end API smoke test
 **Status:** Default · 2026-11-26
-`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 30 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination and admin filters. It complements the pgTAP tests (D17), which test the database on its own.
+`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 29 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination and admin filters. It complements the pgTAP tests (D17), which test the database on its own.
 
 **Not done (interview notes):** rate limiting on writes, an audit log table, and unit tests for `lib/server` with a mocked client.
 
@@ -324,7 +324,7 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
   - **Open redirect:** `app/auth/confirm` redirected to any `next` URL, so `?next=https://evil.example` sent a freshly verified user off-site. It now only allows same-site relative paths.
   - **Sign-up with confirmation off:** sign-up now goes straight to `/dashboard` when the server returns a session.
   - **Logout:** it now refreshes the router, so cached signed-in pages aren't shown afterwards.
-- **New shadcn/ui components:** table, dialog, alert-dialog, select, textarea, tabs, sonner, skeleton, tooltip and separator. The CLI generates them for Tailwind v4, so their four v4-only classes were swapped for v3 equivalents. The template's existing `button.tsx` was kept as it was.
+- **New shadcn/ui components:** table, dialog, alert-dialog, select, textarea, tabs, sonner, skeleton, tooltip and separator. The CLI generates them for Tailwind v4, so their four v4-only classes were swapped for v3 equivalents. The template's existing `button.tsx` was kept as it was. Newer shadcn CLI versions import `cn` from shadcn's separate `cn` npm package. The generated components were pointed back at the project's own `@/lib/utils` helper and the package removed, so there's one implementation of the helper.
 
 ### D44. Page-level smoke test
 **Status:** Default · 2026-11-26
