@@ -5,8 +5,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 import { ApiError } from "@/lib/api/errors";
+import type { AppRole } from "@/lib/roles";
 
-export type AppRole = Database["public"]["Enums"]["app_role"];
+export type { AppRole } from "@/lib/roles";
 export type Db = SupabaseClient<Database>;
 
 export type CurrentUser = {

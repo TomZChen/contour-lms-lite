@@ -7,7 +7,14 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
-  const next = searchParams.get("next") ?? "/";
+  // Only allow same-site relative paths: an absolute or protocol-relative
+  // `next` (e.g. "https://evil.example" or "//evil.example") would turn this
+  // into an open redirect straight after a successful email verification.
+  const requested = searchParams.get("next");
+  const next =
+    requested && requested.startsWith("/") && !requested.startsWith("//") && !requested.startsWith("/\\")
+      ? requested
+      : "/dashboard";
 
   if (token_hash && type) {
     const supabase = await createClient();

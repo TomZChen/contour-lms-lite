@@ -265,3 +265,67 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
 ### D37. Commit the `AGENTS.md` that Next.js generates
 **Status:** Default · 2026-11-26
 `next dev` writes `AGENTS.md`, which points AI agents at the docs for this Next.js version in `node_modules/next/dist/docs`. It's committed, as the file itself recommends, so the working tree stays clean. The route-handler code was checked against those docs.
+
+---
+
+## UI
+
+### D38. Each role has its own area (`/student`, `/tutor`, `/admin`)
+**Status:** Decided · 2026-11-26
+- Each area's layout uses `RoleLayout`. On the server, it redirects signed-out users to `/auth/login` and users with another role to their own area.
+- `/dashboard` is the single landing page after login (login, sign-up and password update all go there) and sends each user to their area.
+- This mirrors the API's `/api/admin` split (D31).
+- The layout check only controls what pages users see. The service layer checks the role again (`requireRole`), and RLS enforces it in the database.
+- The gate runs inside `<Suspense>`, because Cache Components requires request-time data such as cookies to be read inside a boundary. Pages are partially prerendered: a static shell, with per-user content streamed in.
+
+**Rejected:**
+- *One adaptive `/dashboard`:* role logic would be a branch inside one page.
+- *Shared pages + `/admin`:* a mixed model.
+
+### D39. Booking = subject → tutor → slot grid, plus the spec's fields
+**Status:** Decided · 2026-11-26
+- `AvailabilityPicker` shows every tutor for the subject with a **Booked out** badge, or their next free slot.
+- When the chosen tutor is booked out, it recommends tutors for the same subject who have free slots, with their next free time and a one-click switch.
+- Free slots are listed by day, in 14-day windows, up to 8 weeks ahead.
+- The spec's "Datetime for consultation" field is this slot picker. Students can't pick an invalid time, and the server checks it again anyway.
+- First name, last name and reason are ordinary inputs. Names are prefilled from the profile when it has them, and the student can edit them (D9).
+- The form uses react-hook-form with `zodResolver(createConsultationSchema)`, the same schema the API validates with.
+- Server field errors are shown on the matching inputs. A slot that's no longer free (`slot_taken`, etc.) clears the selection and reloads availability.
+
+**Rejected:**
+- *Free datetime input:* students would pick many unavailable times.
+- *Both:* more work, for little extra.
+
+### D40. Booking has its own page; rescheduling uses a dialog; cancelling asks first
+**Status:** Decided · 2026-11-26
+- `/student/book` is its own page, because it's a multi-step form and the URL can be shared.
+- Reschedule opens a dialog that reuses `AvailabilityPicker` for the same subject, and can switch tutor (D26).
+- Cancel uses an `AlertDialog` that asks for confirmation.
+- Complete is a checkbox, which is disabled, with a tooltip, until the consultation has ended (D16). Cancelling a completed consultation is also disabled, with a tooltip (D15).
+
+### D41. Lists: the first page is server-rendered; filters live in the URL; later pages and changes go through the API
+**Status:** Default · 2026-11-26
+- Pages call the service layer directly (D29). Status tabs and the admin filters (subject, tutor, order) are URL search params, so every view can be bookmarked and is server-rendered.
+- `parseListParams()` validates search params with the API's own zod schema, so the server render and "Load more" always use the same filters. Invalid values fall back to the defaults.
+- "Load more" calls the list API with the keyset cursor (D30).
+- Changes call the action endpoints, then update the row in place from the response, or remove it if it no longer matches the current tab.
+- Defaults: students and tutors see **Scheduled**, earliest first. Admins see **All**, latest first.
+
+### D42. Times are shown in Melbourne time, labelled with the zone
+**Status:** Default · 2026-11-26
+`lib/format.ts` uses `Intl.DateTimeFormat` with `timeZone: "Australia/Melbourne"` (D22), whatever the viewer's device is set to. Server and client output match, so hydration is stable, and everyone sees the same wall-clock time.
+
+### D43. Starter template cleaned up; the original is kept for comparison
+**Status:** Decided · 2026-11-26
+- Removed: tutorials, hero, deploy button, logos, `/protected`, `auth-button`, and the OpenGraph and Twitter images.
+- Kept: the auth pages and forms, the theme switcher, `env-var-warning`, and the shadcn/ui components.
+- The untouched template (commit `bddeb1f`) is exported to `../contour-lms-lite-template-original` for side-by-side review. `git diff bddeb1f -- <path>` shows the same changes.
+- **Fixed in the template:**
+  - **Open redirect:** `app/auth/confirm` redirected to any `next` URL, so `?next=https://evil.example` sent a freshly verified user off-site. It now only allows same-site relative paths.
+  - **Sign-up with confirmation off:** sign-up now goes straight to `/dashboard` when the server returns a session.
+  - **Logout:** it now refreshes the router, so cached signed-in pages aren't shown afterwards.
+- **New shadcn/ui components:** table, dialog, alert-dialog, select, textarea, tabs, sonner, skeleton, tooltip and separator. The CLI generates them for Tailwind v4, so their four v4-only classes were swapped for v3 equivalents. The template's existing `button.tsx` was kept as it was.
+
+### D44. Page-level smoke test
+**Status:** Default · 2026-11-26
+`scripts/smoke-pages.mjs` (`npm run test:pages`) checks role gating (11 redirect and access cases) and the server-rendered content for each role. Browser-level checks (the client-side picker flows) weren't automated, because headless Chromium needs a system library (`libasound2`) that isn't installed on the dev machine. Playwright end-to-end tests are listed as future work.

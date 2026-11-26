@@ -2,7 +2,7 @@
 
 A mini-LMS for booking and managing student consultations, with an admin view of every consultation in the system.
 
-> **Status:** work in progress. Only the scaffold exists so far.
+> **Status:** work in progress. Database, API and UI are in place; README sections still being finalised.
 
 ## Tech stack
 
@@ -63,9 +63,24 @@ update public.profiles set role = 'admin' where id = '<auth user id>';
 | `npm run db:reset`  | Recreate the local DB from migrations + seed           |
 | `npm run db:types`  | Generate TypeScript types from the local schema        |
 | `npm run db:test`   | Run the pgTAP RLS / privilege tests                    |
+| `npm run test:pages`| Page/role-gating smoke test (needs `npm run dev`; `BASE=` to override the URL) |
 | `npm run test:api`  | End-to-end API smoke test (needs `npm run dev`; `BASE=` to override the URL) |
 
 ## Implementation summary
+
+### Pages
+
+| Path | Who | What |
+| ---- | --- | ---- |
+| `/` | anyone | Landing page, with sign in / sign up, or a link to your dashboard |
+| `/auth/*` | anyone | Login, sign-up, forgot / update password (from the starter template) |
+| `/dashboard` | signed in | Sends you to your role's area |
+| `/student` | student | My consultations: tabs, complete toggle, reschedule dialog, cancel |
+| `/student/book` | student | Book: subject → tutor (booked-out badges + recommendations) → slot → details |
+| `/tutor` | tutor | My sessions (read-only) |
+| `/admin` | admin | All consultations, with subject, tutor, status and sort filters (read-only) |
+
+Each role area's layout checks the role on the server and redirects anyone else (D38). The first page of each list is server-rendered, and "Load more" and every change go through the API (D41).
 
 ### API
 
