@@ -48,7 +48,20 @@ export const listConsultationsQuery = z.strictObject({
 });
 export type ListConsultationsQuery = z.infer<typeof listConsultationsQuery>;
 
+/**
+ * Student-name search (admin list). Letters, spaces, apostrophes, hyphens and
+ * full stops only, so the words are safe to embed in a PostgREST filter.
+ */
+export const nameSearch = z
+  .string()
+  .trim()
+  .max(100)
+  .regex(/^[\p{L}\p{M}\s'.-]*$/u, "Use letters, spaces, apostrophes or hyphens only.")
+  .transform((s) => s.replace(/\s+/g, " ") || undefined);
+
 export const adminListConsultationsQuery = listConsultationsQuery.extend({
+  /** Matches the student's first/last name on the booking; every word must match. */
+  q: nameSearch.optional(),
   studentId: id.optional(),
   tutorId: id.optional(),
   subjectId: id.optional(),

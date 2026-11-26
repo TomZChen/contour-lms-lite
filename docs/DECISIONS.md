@@ -254,7 +254,7 @@ For every route, the wrapper:
 
 ### D35. End-to-end API smoke test
 **Status:** Default · 2026-11-26
-`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 29 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination and admin filters. It complements the pgTAP tests (D17), which test the database on its own.
+`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 33 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination and admin filters. It complements the pgTAP tests (D17), which test the database on its own.
 
 **Not done (interview notes):** rate limiting on writes, an audit log table, and unit tests for `lib/server` with a mocked client.
 
@@ -305,7 +305,7 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
 
 ### D41. Lists: the first page is server-rendered; filters live in the URL; later pages and changes go through the API
 **Status:** Default · 2026-11-26
-- Pages call the service layer directly (D29). Status tabs and the admin filters (subject, tutor, order) are URL search params, so every view can be bookmarked and is server-rendered.
+- Pages call the service layer directly (D29). Status tabs and the admin filters (student-name search, subject, tutor, order) are URL search params, so every view can be bookmarked and is server-rendered.
 - `parseListParams()` validates search params with the API's own zod schema, so the server render and "Load more" always use the same filters. Invalid values fall back to the defaults.
 - "Load more" calls the list API with the keyset cursor (D30).
 - Changes call the action endpoints, then update the row in place from the response, or remove it if it no longer matches the current tab.
@@ -329,3 +329,16 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
 ### D44. Page-level smoke test
 **Status:** Default · 2026-11-26
 `scripts/smoke-pages.mjs` (`npm run test:pages`) checks role gating (11 redirect and access cases) and the server-rendered content for each role. Browser-level checks (the client-side picker flows) weren't automated, because headless Chromium needs a system library (`libasound2`) that isn't installed on the dev machine. Playwright end-to-end tests are listed as future work.
+
+### D45. Admins can search consultations by student name
+**Status:** Decided · 2026-11-26 (requested by the user)
+- **What's searched:** the first and last name entered on each booking (the spec's form fields), not the account profile. That's the name the admin sees in the list, and the account name can differ.
+- **Matching:** `GET /api/admin/consultations?q=…`. Each word must appear, ignoring case, in either the first or the last name, so "sam stu" finds Sam Student. It's combined with the other filters and keyset pagination as normal. At most 5 words are used.
+- **Safety:** the words go into a PostgREST `or=(…ilike…)` filter. `q` is limited to 100 characters of letters, spaces, apostrophes, hyphens and full stops. That rules out the characters that could break out of a quoted filter value (`"`, `,`, `(`, `)`) and LIKE wildcards (`%`, `_`, `*`). Anything else is a 400.
+- **Scalability:** `ILIKE '%word%'` can't use a btree index. A new migration adds `pg_trgm` and trigram GIN indexes on `first_name` and `last_name`.
+- **UI:** a search box in the admin filters. It updates `?q=` in the URL after 300 ms (with `router.replace`, so typing doesn't fill the history), and the list is server-rendered like the other filters (D41).
+- **Rejected:**
+  - *Full-text search (`tsvector`):* built for words in prose. It's poor at matching part of a name ("Sam" in "Samantha") without prefix-query tricks.
+  - *Searching the account's profile name:* possible through an `!inner` embed of `profiles` on `student_id`, but it searches a name the admin doesn't see in the list. It also turns the shared list query into a join, and `profiles.full_name` would need its own trigram index.
+  - *An RPC function:* more code for the same result. PostgREST filters keep it in the one shared list query.
+

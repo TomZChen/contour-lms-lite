@@ -20,6 +20,7 @@ export function parseListParams(sp: SearchParams, defaults: { status: Consultati
     order: first("order") ?? defaults.order,
     subjectId: first("subjectId"),
     tutorId: first("tutorId"),
+    q: first("q"),
     limit: "20",
   };
   const parsed = adminListConsultationsQuery.safeParse(
@@ -32,6 +33,7 @@ export function parseListParams(sp: SearchParams, defaults: { status: Consultati
   if (query.status) apiQuery.status = query.status;
   if (query.subjectId) apiQuery.subjectId = query.subjectId;
   if (query.tutorId) apiQuery.tutorId = query.tutorId;
+  if (query.q) apiQuery.q = query.q;
 
   return { query, apiQuery, currentTab: query.status ?? "all" };
 }

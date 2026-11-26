@@ -9,7 +9,7 @@ A mini-LMS where students book 60-minute consultations with subject tutors, then
 - **Booking form:** first name, last name, reason and datetime. The datetime is picked from the chosen tutor's free slots.
 - **Availability:** tutors with no free slots are flagged **Booked out**, and other tutors for the same subject are recommended.
 - **Double-booking prevention:** the database stops a tutor or a student being booked twice for the same time, even when requests arrive at the same moment.
-- **Admin view:** every consultation, read-only, with filters and cursor pagination.
+- **Admin view:** every consultation, read-only, with student-name search, filters and cursor pagination.
 
 ---
 
@@ -24,7 +24,7 @@ A mini-LMS where students book 60-minute consultations with subject tutors, then
 7. [Known limitations & future work](#known-limitations--future-work)
 8. [AI usage](#ai-usage)
 
-The full decision log (44 decisions with reasoning and rejected alternatives) is in [`docs/DECISIONS.md`](docs/DECISIONS.md). Each `Dnn` reference below points there.
+The full decision log (45 decisions with reasoning and rejected alternatives) is in [`docs/DECISIONS.md`](docs/DECISIONS.md). Each `Dnn` reference below points there.
 
 ---
 
@@ -165,7 +165,7 @@ Server Components (pages) ─────────────►  Service la
 | `/student` | student | Status tabs; *Done* checkbox, **Reschedule** dialog and **Cancel** confirmation per row |
 | `/student/book` | student | Subject → tutor (booked-out badges + recommendations) → slot grid → your details |
 | `/tutor` | tutor | Sessions booked with you (read-only) |
-| `/admin` | admin | Every consultation; subject, tutor, status and sort filters (read-only) |
+| `/admin` | admin | Every consultation; student-name search, subject, tutor, status and sort filters (read-only) |
 
 - The first page of each list is rendered on the server. Filters live in the URL, and "Load more" uses the API's cursor (D41).
 - Times are always shown in Melbourne time, labelled AEST/AEDT (D42).
@@ -186,7 +186,7 @@ Every endpoint needs a session and otherwise returns a JSON 401. Responses are J
 | PUT | `/api/consultations/:id/completion` | the student | Mark complete (only once it has ended) |
 | DELETE | `/api/consultations/:id/completion` | the student | Mark incomplete |
 | POST | `/api/consultations/:id/cancel` | the student | Soft cancel |
-| GET | `/api/admin/consultations?…&studentId&tutorId&subjectId` | admin | Every consultation |
+| GET | `/api/admin/consultations?…&q&studentId&tutorId&subjectId` | admin | Every consultation; `q` searches the student's name (D45) |
 
 **Design (D28–D33)**
 - **Action endpoints:** each change has its own endpoint with a narrow, strict body, so actions can't be smuggled into one generic `PATCH`. Completion is a sub-resource, so `PUT` and `DELETE` are both idempotent.
@@ -250,6 +250,7 @@ Migrations live in `supabase/migrations/` and are applied in order. Applied migr
 | `20261126100000_add_tutor_role.sql` | Adds `'tutor'` to `app_role`. It's in its own file because Postgres can't use a new enum value in the same transaction that adds it |
 | `20261126100100_tutors_subjects_availability.sql` | `subjects`, `tutor_subjects`, `tutor_availability`; consultation subject, tutor and end time; exclusion constraints; booking trigger; three-role policies; `get_free_slots()` |
 | `20261126110000_consultations_direct_fks.sql` | Direct FKs so PostgREST can embed tutor and subject in responses (D34) |
+| `20261126120000_consultation_name_search.sql` | `pg_trgm` and trigram GIN indexes on `first_name` and `last_name` for the admin name search (D45) |
 
 ```
 auth.users ─1:1─ profiles (role: student | tutor | admin, full_name)
@@ -280,7 +281,7 @@ auth.users ─1:1─ profiles (role: student | tutor | admin, full_name)
 - `CHECK`: a consultation can't be both completed and cancelled.
 - `EXCLUDE USING gist`: no overlapping active bookings per tutor, and none per student.
 
-**Indexes:** `(student_id, scheduled_at)`, `(tutor_id, scheduled_at)`, `(scheduled_at)` and `(subject_id)`, matching the dashboard, tutor, admin and filter queries. The GiST indexes behind the exclusion constraints also serve the overlap checks.
+**Indexes:** `(student_id, scheduled_at)`, `(tutor_id, scheduled_at)`, `(scheduled_at)` and `(subject_id)`, matching the dashboard, tutor, admin and filter queries. Trigram GIN indexes on `first_name` and `last_name` serve the admin name search, whose `ILIKE '%word%'` can't use a btree index. The GiST indexes behind the exclusion constraints also serve the overlap checks.
 
 **Other objects**
 
@@ -347,8 +348,8 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 | Suite | Command | Covers |
 | ----- | ------- | ------ |
 | pgTAP | `npm run db:test` | 38 tests (see below) |
-| API smoke | `npm run test:api` | 29 HTTP calls as the seeded student, tutor and admin (see below) |
-| Page smoke | `npm run test:pages` | 17 checks of role redirects and server-rendered content per role |
+| API smoke | `npm run test:api` | 33 HTTP calls as the seeded student, tutor and admin (see below) |
+| Page smoke | `npm run test:pages` | 19 checks of role redirects and server-rendered content per role |
 | Static | `npm run lint && npm run typecheck && npm run build` | ESLint, TypeScript, and the production build, including Cache Components checks |
 
 **pgTAP (`npm run db:test`)** covers:
@@ -366,7 +367,7 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 - validation errors;
 - overlapping bookings and booking-rule errors;
 - pagination and tampered cursors;
-- admin filters.
+- admin filters and student-name search, including input that tries to inject filter syntax.
 
 The API and page smoke tests need a running app (`npm run dev`) on a freshly reset database (`npm run db:reset`). The API test leaves a cancelled booking behind, so reset again for a clean slate.
 
@@ -380,7 +381,7 @@ The API and page smoke tests need a running app (`npm run dev`) on a freshly res
 - **Audit log:** a table of who changed what, for example rescheduling history.
 - **Scheduling features:** tutors managing their own availability, leave and exceptions, and variable session lengths.
 - **Notifications:** confirmation and reminder emails, and calendar (ICS) invites.
-- **Admin tools:** user and role management, writes with an audit trail, and filtering by student name (the API already supports `studentId`).
+- **Admin tools:** user and role management, and writes with an audit trail.
 - **Time zones:** a timezone per user or tutor, in place of one business timezone.
 - **Session revocation:** switch to `getUser()` if immediate revocation is a requirement.
 

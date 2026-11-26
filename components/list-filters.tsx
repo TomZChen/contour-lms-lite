@@ -1,7 +1,10 @@
 "use client";
 
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SubjectDto } from "@/lib/dto";
 import { cn } from "@/lib/utils";
@@ -43,18 +46,29 @@ export function StatusTabs({ current }: { current: string }) {
 
 const ANY = "any";
 
-/** Admin filters: subject, tutor and sort order, kept in the URL. */
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** Admin filters: student name search, subject, tutor and sort order, kept in the URL. */
 export function AdminFilters({ subjects }: { subjects: SubjectDto[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const [search, setSearch] = useState(params.get("q") ?? "");
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const set = (key: string, value: string) => {
+  const set = (key: string, value: string, mode: "push" | "replace" = "push") => {
     const next = new URLSearchParams(params);
-    if (value === ANY) next.delete(key);
+    if (value === ANY || value === "") next.delete(key);
     else next.set(key, value);
     if (key === "subjectId") next.delete("tutorId"); // tutor list depends on subject
-    router.push(`${pathname}?${next}`);
+    router[mode](`${pathname}?${next}`);
+  };
+
+  // Search as you type, debounced. `replace` so each keystroke isn't a history entry.
+  const onSearchChange = (value: string) => {
+    setSearch(value);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => set("q", value.trim(), "replace"), SEARCH_DEBOUNCE_MS);
   };
 
   const subjectId = params.get("subjectId") ?? ANY;
@@ -64,6 +78,18 @@ export function AdminFilters({ subjects }: { subjects: SubjectDto[] }) {
 
   return (
     <div className="mb-4 flex flex-wrap gap-3">
+      <div className="relative w-full sm:w-64">
+        <Search className="text-muted-foreground pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
+        <Input
+          type="search"
+          placeholder="Search student name"
+          aria-label="Search by student name"
+          className="pl-8"
+          maxLength={100}
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+        />
+      </div>
       <Select value={subjectId} onValueChange={(v) => set("subjectId", v)}>
         <SelectTrigger className="w-48" aria-label="Subject"><SelectValue /></SelectTrigger>
         <SelectContent>

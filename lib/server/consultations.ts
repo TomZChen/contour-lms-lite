@@ -87,7 +87,7 @@ function decodeCursor(cursor: string): [string, string] {
   }
 }
 
-type ListFilters = Partial<Pick<AdminListConsultationsQuery, "studentId" | "tutorId" | "subjectId">> &
+type ListFilters = Partial<Pick<AdminListConsultationsQuery, "q" | "studentId" | "tutorId" | "subjectId">> &
   ListConsultationsQuery;
 
 async function listConsultations(supabase: Db, q: ListFilters): Promise<Page<ConsultationDto>> {
@@ -97,6 +97,14 @@ async function listConsultations(supabase: Db, q: ListFilters): Promise<Page<Con
   if (q.studentId) query = query.eq("student_id", q.studentId);
   if (q.tutorId) query = query.eq("tutor_id", q.tutorId);
   if (q.subjectId) query = query.eq("subject_id", q.subjectId);
+
+  // Name search: every word must appear in the first or last name, ignoring
+  // case. `nameSearch` only allows letters, spaces, ' . and -, so a quoted
+  // word can't break out of the filter or add LIKE wildcards. Backed by
+  // trigram indexes (see the name-search migration).
+  for (const word of q.q?.split(" ").slice(0, 5) ?? []) {
+    query = query.or(`first_name.ilike."*${word}*",last_name.ilike."*${word}*"`);
+  }
 
   if (q.status === "scheduled") query = query.is("completed_at", null).is("cancelled_at", null);
   if (q.status === "completed") query = query.not("completed_at", "is", null);

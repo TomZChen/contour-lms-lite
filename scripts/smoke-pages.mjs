@@ -29,6 +29,8 @@ const checks = [
   ["admin", "/admin", { contains: ["All consultations", "Riley", "Marcus Lindqvist", "Load more"] }],
   ["admin", "/admin?status=completed", { contains: ["Sam", "Course selection advice", "Lucas Ferreira"], absent: ["Riley"] }],
   ["admin", "/admin?status=bogus", { contains: ["All consultations"] }],
+  ["admin", "/admin?q=sam+student", { contains: ["Sam", "Course selection advice", "Search student name"], absent: ["Riley"] }],
+  ["admin", "/admin?q=nobody", { contains: ["No consultations for a student matching"] }],
 ];
 let fail = 0;
 for (const [who, path, exp] of checks) {

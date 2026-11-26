@@ -27,7 +27,7 @@ export default async function AdminHomePage({ searchParams }: { searchParams: Pr
         endpoint="/api/admin/consultations"
         query={apiQuery}
         status={query.status}
-        emptyMessage="No consultations match these filters."
+        emptyMessage={query.q ? `No consultations for a student matching “${query.q}”.` : "No consultations match these filters."}
       />
     </>
   );

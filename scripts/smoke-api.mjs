@@ -119,5 +119,15 @@ const all = await call("admin list", admin, "GET", "/api/admin/consultations?lim
 console.log("      admin page:", all.items.length, "nextCursor?", Boolean(all.nextCursor));
 await call("admin list filter by tutor", admin, "GET", `/api/admin/consultations?tutorId=${chloe.id}&status=cancelled`, { expect: 200 });
 
+// Student-name search: every word must match the first or last name, any case.
+const check = (label, cond) => { if (!cond) failures++; console.log(`${cond ? "PASS" : "FAIL"}     ${label}`); };
+const sam = await call("admin search 'sam stu'", admin, "GET", "/api/admin/consultations?q=sam%20stu&limit=100", { expect: 200 });
+check("  every result is Sam Student", sam.items.length > 0 && sam.items.every((c) => c.firstName === "Sam" && c.lastName === "Student"));
+const riley = await call("admin search 'EXAMPLE'", admin, "GET", "/api/admin/consultations?q=EXAMPLE&limit=100", { expect: 200 });
+check("  every result is Riley Example", riley.items.length > 0 && riley.items.every((c) => c.lastName === "Example"));
+const none = await call("admin search 'sam example' (no match)", admin, "GET", "/api/admin/consultations?q=sam%20example", { expect: 200 });
+check("  no results", none.items.length === 0);
+await call("admin search rejects filter syntax", admin, "GET", "/api/admin/consultations?q=a%22%2Cid.neq.x", { expect: 400 });
+
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
 process.exit(failures ? 1 : 0);
