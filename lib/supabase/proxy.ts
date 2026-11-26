@@ -47,8 +47,11 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
+  // API routes authenticate every request themselves and answer with a JSON
+  // 401, so they are never redirected to the HTML login page.
   if (
     request.nextUrl.pathname !== "/" &&
+    !request.nextUrl.pathname.startsWith("/api/") &&
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth")

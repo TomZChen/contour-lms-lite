@@ -183,3 +183,85 @@ A second exclusion constraint on `student_id`. It seems clearly intended, and co
 ### D27. Schema changes are new migrations, never edits to applied ones
 **Status:** Default · 2026-11-26
 Tutors were added in new migration files. No production data exists, so `NOT NULL` columns were added directly. On live data they'd be added as nullable, backfilled, then made `NOT NULL`.
+
+---
+
+## API
+
+### D28. Changes use action endpoints, not a generic PATCH
+**Status:** Decided · 2026-11-26
+- `POST /api/consultations/:id/reschedule` takes `{ scheduledAt, tutorId? }`.
+- `PUT` / `DELETE /api/consultations/:id/completion` marks the consultation complete or incomplete. Completion is a sub-resource, so both directions are idempotent.
+- `POST /api/consultations/:id/cancel` soft-cancels the consultation.
+- Each route accepts one narrow request body (zod `strictObject`, unknown fields rejected), so actions can't be combined in one request, such as uncancelling while rescheduling. Each can also be authorized and audited separately.
+
+**Rejected:**
+- *Single PATCH:* one route would have to reject illegal combinations of fields itself.
+- *DELETE to cancel:* DELETE implies the row is removed, which contradicts the soft cancel.
+
+### D29. Shared service layer: route handlers for writes, server components for first render
+**Status:** Decided · 2026-11-26
+- `lib/server/*.ts` (marked `server-only`) holds every query and business rule.
+- Route handlers in `app/api/**` are thin: they parse the request, call the service and return JSON.
+- Server components call the same service functions directly for the first render, so there's no extra HTTP hop to the app's own server.
+- Client components call the API routes for writes and live data (availability), then `router.refresh()`.
+- Every path uses the same RLS-scoped Supabase client acting as the user.
+
+**Rejected:**
+- *Everything client-fetched through the API:* loses server rendering, and needs an extra data-fetching library.
+- *Server components fetching `/api`:* an extra hop, fragile cookie forwarding, and Next.js advises against it.
+
+### D30. Cursor (keyset) pagination
+**Status:** Decided · 2026-11-26
+- `?cursor=<opaque>&limit=1..100` (default 20), ordered by `(scheduled_at, id)` using the existing composite indexes.
+- Each page costs the same however deep it is, and pages stay stable when rows are inserted.
+- The cursor is base64url-encoded JSON, validated with zod on decode, so only a timestamp and a uuid ever reach the PostgREST filter. Arbitrary input can't inject filter syntax.
+- The service fetches `limit + 1` rows to tell whether another page exists, which avoids a `count(*)`.
+
+**Rejected:** offset pagination, because deep pages slow down and the count gets expensive.
+
+### D31. A separate admin endpoint
+**Status:** Decided · 2026-11-26
+- `GET /api/consultations` returns *my* consultations: bookings for a student, sessions for a tutor.
+- `GET /api/admin/consultations` returns everything, with `studentId`, `tutorId`, `subjectId` and `status` filters. It calls `requireRole(user, "admin")`, so anyone else gets a 403.
+- Role checks are explicit in the code, and RLS still enforces the same rules underneath.
+
+**Rejected:** one endpoint scoped only by RLS, because the role behaviour would be implicit.
+
+### D32. Cross-cutting route concerns live in a single wrapper, `authedRoute()`
+**Status:** Default · 2026-11-26
+For every route, the wrapper:
+- **Checks the session:** `getClaims()` verifies the JWT, then the role is read from `profiles`, so a role change applies on the next request (D6). If either step fails, it returns 401.
+- **Blocks CSRF on writes:** it rejects `Sec-Fetch-Site: cross-site` and any `Origin` that doesn't match the host, and requires `application/json` for request bodies. The session cookie is already set to `SameSite=Lax`.
+- **Validates input:** zod checks the body, query string and route params. A malformed id returns 404, the same as any unknown id.
+- **Uses one error format:** `{ error: { code, message, details? } }`. Database errors map to HTTP statuses (`23P01` → 409, booking-rule `P0001` → 422, `42501` → 403, `PGRST116` → 404). Raw SQL errors are never returned.
+- **Marks responses private:** `Cache-Control: private, no-store`.
+- **Lets the API answer for itself:** the proxy no longer redirects `/api/*` to the login page, so API clients get a JSON 401, not an HTML redirect.
+
+**Known trade-off:** `getClaims()` verifies the JWT without asking the server, so a session revoked mid-token stays valid until the token expires (one hour by default). PostgREST applies the same rule. If immediate revocation matters, switch to `getUser()`, which costs one network round trip per request.
+
+### D33. Visible-but-not-yours writes return 403, invisible ones 404
+**Status:** Default · 2026-11-26
+- A tutor or admin who can see a consultation but tries to change it gets a 403.
+- A user who can't see it at all gets a 404, so the API never reveals whether a consultation they can't see exists.
+- The service checks state before writing, to give precise errors: 409 `consultation_cancelled`, 409 `consultation_completed`, and 422 `consultation_not_ended`. The database enforces the same rules anyway.
+
+### D34. Direct FKs from consultations to profiles and subjects
+**Status:** Default · 2026-11-26
+- The composite FK to `tutor_subjects` already guarantees integrity.
+- PostgREST needs single-column FKs to embed `tutor` and `subject` details in responses, so these were added in a new migration.
+- Both are `ON DELETE RESTRICT`, so a tutor or subject that has consultations can't be deleted and history is kept.
+
+### D35. End-to-end API smoke test
+**Status:** Default · 2026-11-26
+`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 30 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination and admin filters. It complements the pgTAP tests (D17), which test the database on its own.
+
+**Not done (interview notes):** rate limiting on writes, an audit log table, and unit tests for `lib/server` with a mocked client.
+
+### D36. The route wrapper rethrows Next.js control-flow errors
+**Status:** Default · 2026-11-26
+This template enables `cacheComponents`. During the build, `cookies()` rejects on purpose to mark a route as dynamic. `authedRoute()` calls `unstable_rethrow()` before its own error handling, so that signal (and `notFound()`/`redirect()`) isn't turned into a 500 response. The build output confirms every `/api` route is dynamic (`ƒ`).
+
+### D37. Commit the `AGENTS.md` that Next.js generates
+**Status:** Default · 2026-11-26
+`next dev` writes `AGENTS.md`, which points AI agents at the docs for this Next.js version in `node_modules/next/dist/docs`. It's committed, as the file itself recommends, so the working tree stays clean. The route-handler code was checked against those docs.

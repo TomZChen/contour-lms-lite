@@ -63,10 +63,36 @@ update public.profiles set role = 'admin' where id = '<auth user id>';
 | `npm run db:reset`  | Recreate the local DB from migrations + seed           |
 | `npm run db:types`  | Generate TypeScript types from the local schema        |
 | `npm run db:test`   | Run the pgTAP RLS / privilege tests                    |
+| `npm run test:api`  | End-to-end API smoke test (needs `npm run dev`; `BASE=` to override the URL) |
 
 ## Implementation summary
 
-_To be written._
+### API
+
+Every endpoint needs a session (a JSON 401 otherwise) and returns JSON. Errors look like `{ error: { code, message, details? } }`.
+
+| Method | Path | Who | Purpose |
+| ------ | ---- | --- | ------- |
+| GET    | `/api/me` | any | Current user and role |
+| GET    | `/api/subjects` | any | Subjects with their tutors |
+| GET    | `/api/subjects/:id/availability?from&to&tutorId&at` | any | Free slots per tutor, booked-out flags, recommended alternative tutors |
+| GET    | `/api/consultations?cursor&limit&status&order` | student, tutor | My bookings (student) or my sessions (tutor) |
+| POST   | `/api/consultations` | student | Book `{ firstName, lastName, reason, scheduledAt, subjectId, tutorId }` |
+| GET    | `/api/consultations/:id` | owner, its tutor, admin | One consultation |
+| POST   | `/api/consultations/:id/reschedule` | owner | `{ scheduledAt, tutorId? }` |
+| PUT    | `/api/consultations/:id/completion` | owner | Mark complete (only once it has ended) |
+| DELETE | `/api/consultations/:id/completion` | owner | Mark incomplete |
+| POST   | `/api/consultations/:id/cancel` | owner | Soft cancel |
+| GET    | `/api/admin/consultations?…&studentId&tutorId&subjectId` | admin | Every consultation |
+
+**Layers:**
+- **`app/api/**/route.ts`:** thin HTTP handlers.
+- **`lib/api/route.ts`:** the `authedRoute()` wrapper (auth, CSRF, zod parsing, error mapping).
+- **`lib/server/*.ts`:** the service layer (queries and business rules). Server components call it directly too.
+- **`lib/validation.ts`:** zod schemas shared with the client-side forms.
+- **`lib/dto.ts`:** response types.
+
+Lists use cursor (keyset) pagination, and `nextCursor` is `null` on the last page.
 
 ## Database schema & migrations
 

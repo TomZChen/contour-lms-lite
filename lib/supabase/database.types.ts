@@ -42,6 +42,18 @@ isOneToOne: false
       referencedRelation: "profiles"
       referencedColumns: ["id"]
     },{
+      foreignKeyName: "consultations_subject_id_fkey"
+      columns: ["subject_id"]
+isOneToOne: false
+      referencedRelation: "subjects"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "consultations_tutor_id_fkey"
+      columns: ["tutor_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    },{
       foreignKeyName: "consultations_tutor_teaches_subject"
       columns: ["tutor_id","subject_id"]
 isOneToOne: false
