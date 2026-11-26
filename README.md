@@ -42,6 +42,8 @@ Email confirmation is turned off for the local stack, so new sign-ups can log in
 | --------------------- | ------------- | ------- |
 | `admin@example.com`   | `password123` | admin   |
 | `student@example.com` | `password123` | student |
+| `riley@example.com`   | `password123` | student (fills Marcus's calendar) |
+| `marcus.lindqvist@tutors.example.com` | `password123` | tutor (one of 15) |
 
 New sign-ups are always students. To promote a user to admin (this is also the production procedure):
 
@@ -71,27 +73,40 @@ _To be written._
 Migrations live in `supabase/migrations/`. The local seed is `supabase/seed.sql`.
 
 ```
-auth.users ─1:1─ profiles ─1:n─ consultations
+auth.users ─1:1─ profiles (role: student | tutor | admin)
+                    │
+     tutor ─────────┼──< tutor_subjects >── subjects
+       │            │
+       └──< tutor_availability (weekly windows, Melbourne time)
+                    │
+   student / tutor ─┴──< consultations (subject_id + tutor_id → tutor_subjects)
 
-profiles                       consultations
-  id          uuid PK/FK         id            uuid PK
-  role        app_role           student_id    uuid FK → profiles (default auth.uid())
-  created_at  timestamptz        first_name    text (1–100)
-                                 last_name     text (1–100)
-                                 reason        text (1–1000)
-                                 scheduled_at  timestamptz
-                                 completed_at  timestamptz null  (null = incomplete)
-                                 cancelled_at  timestamptz null  (soft cancel)
-                                 created_at / updated_at
+consultations
+  id, student_id (default auth.uid()), subject_id, tutor_id
+  first_name, last_name, reason               (the booking form)
+  scheduled_at, ends_at (= +60 min, trigger)  (slots on the hour)
+  completed_at  null = incomplete             (only after ends_at)
+  cancelled_at  soft cancel, row then immutable
+  created_at / updated_at
 ```
 
-**How access is enforced:**
-- RLS is enabled on every table.
-- Students can read, insert and update their own rows. Admins can read every row and change none.
-- `private.is_admin()` (`SECURITY DEFINER`, not exposed by the API) performs the role check.
-- Column-level grants restrict what `authenticated` can write. There's no `DELETE` grant.
-- Cancelled rows can't be changed.
-- `supabase/tests/rls_test.sql` tests all of these rules.
+**How access and booking rules are enforced** (see `docs/DECISIONS.md` for the reasoning):
+- RLS is enabled on every table. A single role helper, `private.current_user_role()`, is `SECURITY DEFINER` and isn't exposed by the API.
+- **Students** read, book and update only their own consultations.
+- **Tutors** read only the consultations booked with them.
+- **Admins** read everything.
+- Tutors and admins can't change any consultation.
+- Column-level grants restrict what can be written. There's no `DELETE` grant.
+- Exclusion constraints make double-booking a tutor, or a student, impossible, even with concurrent requests.
+- A trigger enforces the booking rules: the slot is in the future, on the hour, and within the tutor's availability.
+- `public.get_free_slots()` returns only `(tutor_id, slot_start)` pairs, which drives the "booked out" display and the alternative-tutor recommendations without revealing other students' bookings.
+- `supabase/tests/rls_test.sql` has 38 pgTAP tests covering all of the above.
+
+### Demo scenario
+
+- The seed has 15 tutors with fictional names across Biology, UCAT, Math Methods, Specialist Math, Physics and Chemistry. Each has a random weekly schedule from a fixed seed, so it's the same after every reset.
+- **Marcus Lindqvist** (Specialist Math) is fully booked for the next 14 days, so a student who picks him is recommended **Chloe Nguyen**.
+- Tutor logins follow the pattern `first.last@tutors.example.com`, with password `password123`.
 
 ## Justifications & assumptions
 
