@@ -36,6 +36,19 @@ npm run dev                 # http://localhost:3000
 
 Email confirmation is turned off for the local stack, so new sign-ups can log in straight away.
 
+### Demo accounts (local seed)
+
+| Email                 | Password      | Role    |
+| --------------------- | ------------- | ------- |
+| `admin@example.com`   | `password123` | admin   |
+| `student@example.com` | `password123` | student |
+
+New sign-ups are always students. To promote a user to admin (this is also the production procedure):
+
+```sql
+update public.profiles set role = 'admin' where id = '<auth user id>';
+```
+
 ### Scripts
 
 | Script              | Purpose                                                |
@@ -47,6 +60,7 @@ Email confirmation is turned off for the local stack, so new sign-ups can log in
 | `npm run db:stop`   | Stop local Supabase                                    |
 | `npm run db:reset`  | Recreate the local DB from migrations + seed           |
 | `npm run db:types`  | Generate TypeScript types from the local schema        |
+| `npm run db:test`   | Run the pgTAP RLS / privilege tests                    |
 
 ## Implementation summary
 
@@ -54,9 +68,34 @@ _To be written._
 
 ## Database schema & migrations
 
-_To be written._ Migrations live in `supabase/migrations/`.
+Migrations live in `supabase/migrations/`. The local seed is `supabase/seed.sql`.
+
+```
+auth.users ─1:1─ profiles ─1:n─ consultations
+
+profiles                       consultations
+  id          uuid PK/FK         id            uuid PK
+  role        app_role           student_id    uuid FK → profiles (default auth.uid())
+  created_at  timestamptz        first_name    text (1–100)
+                                 last_name     text (1–100)
+                                 reason        text (1–1000)
+                                 scheduled_at  timestamptz
+                                 completed_at  timestamptz null  (null = incomplete)
+                                 cancelled_at  timestamptz null  (soft cancel)
+                                 created_at / updated_at
+```
+
+**How access is enforced:**
+- RLS is enabled on every table.
+- Students can read, insert and update their own rows. Admins can read every row and change none.
+- `private.is_admin()` (`SECURITY DEFINER`, not exposed by the API) performs the role check.
+- Column-level grants restrict what `authenticated` can write. There's no `DELETE` grant.
+- Cancelled rows can't be changed.
+- `supabase/tests/rls_test.sql` tests all of these rules.
 
 ## Justifications & assumptions
+
+The full decision log, with the alternatives considered, is in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 - **Dependencies are pinned** (`next`, `@supabase/*`) instead of the template's `latest`, so builds are reproducible.
 - **Supabase CLI is a dev dependency**, so every contributor uses the same CLI version.
