@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isDateKey, localParts, startOfWeek } from "@/lib/calendar";
 import type { ConsultationStatus } from "@/lib/dto";
 import { adminListConsultationsQuery } from "@/lib/validation";
 
@@ -35,5 +36,12 @@ export function parseListParams(sp: SearchParams, defaults: { status: Consultati
   if (query.tutorId) apiQuery.tutorId = query.tutorId;
   if (query.q) apiQuery.q = query.q;
 
-  return { query, apiQuery, currentTab: query.status ?? "all" };
+  // List or week calendar (D47). `week` is any day of the week to show;
+  // it's normalised to that week's Monday. Defaults to the current week.
+  const view = first("view") === "calendar" ? "calendar" : "list";
+  const todayKey = localParts(new Date()).dateKey;
+  const weekParam = first("week");
+  const weekKey = startOfWeek(weekParam && isDateKey(weekParam) ? weekParam : todayKey);
+
+  return { query, apiQuery, currentTab: query.status ?? "all", view, weekKey, todayKey } as const;
 }

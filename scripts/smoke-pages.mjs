@@ -11,6 +11,9 @@ async function login(email) {
   return `${COOKIE}=base64-` + Buffer.from(JSON.stringify(await r.json())).toString("base64url");
 }
 const users = { anon: null, student: await login("student@example.com"), tutor: await login("marcus.lindqvist@tutors.example.com"), admin: await login("admin@example.com") };
+// Any day next week, as YYYY-MM-DD (the page normalises it to the Monday).
+const NEXT_WEEK = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+
 const checks = [
   ["anon", "/student", { redirectTo: "/auth/login" }],
   ["anon", "/", { contains: ["Sign in", "Create an account"] }],
@@ -31,6 +34,14 @@ const checks = [
   ["admin", "/admin?status=bogus", { contains: ["All consultations"] }],
   ["admin", "/admin?q=sam+student", { contains: ["Sam", "Course selection advice", "Search student name"], absent: ["Riley"] }],
   ["admin", "/admin?q=nobody", { contains: ["No consultations for a student matching"] }],
+  // Week calendar (D47). Riley fills Marcus's free hours for the next 14 days.
+  ["student", "/student?view=calendar", { contains: ["This week", "Melbourne time", "(today)", "Calendar"] }],
+  ["student", "/student?view=calendar&week=bogus", { contains: ["This week", "(today)"] }],
+  ["tutor", `/tutor?view=calendar&week=${NEXT_WEEK}`, { contains: ["Riley Example", "Specialist Math"], absent: ["(today)"] }],
+  ["admin", `/admin?view=calendar&week=${NEXT_WEEK}&q=riley`, { contains: ["Riley Example", "Marcus Lindqvist"], absent: ["Sam Student"] }],
+  // Availability editor (D46).
+  ["tutor", "/tutor/availability", { contains: ["Availability", "Save availability", "Has upcoming sessions"] }],
+  ["student", "/tutor/availability", { redirectTo: "/student" }],
 ];
 let fail = 0;
 for (const [who, path, exp] of checks) {

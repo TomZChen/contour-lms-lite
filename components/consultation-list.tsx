@@ -12,7 +12,7 @@ import { StudentActions } from "./consultation-actions";
 
 type Mode = "student" | "tutor" | "admin";
 
-const STATUS_BADGE: Record<ConsultationStatus, { label: string; variant: "default" | "secondary" | "outline" }> = {
+export const STATUS_BADGE: Record<ConsultationStatus, { label: string; variant: "default" | "secondary" | "outline" }> = {
   scheduled: { label: "Scheduled", variant: "outline" },
   completed: { label: "Completed", variant: "default" },
   cancelled: { label: "Cancelled", variant: "secondary" },

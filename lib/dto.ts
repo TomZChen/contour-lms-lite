@@ -59,6 +59,18 @@ export type AvailabilityDto = {
   recommendations: TutorAvailabilityDto[];
 };
 
+/** A recurring weekly window, in Melbourne time. ISO weekday: 1 = Monday. */
+export type AvailabilityWindowDto = { weekday: number; start: string; end: string };
+
+export type TutorScheduleDto = {
+  windows: AvailabilityWindowDto[];
+  /** Weekly hours that hold upcoming scheduled sessions (they can't be removed). */
+  booked: { weekday: number; hour: number; count: number }[];
+};
+
+/** `details` of a 409 `availability_conflict`. */
+export type AvailabilityConflictDetails = { conflicts: { id: string; scheduledAt: string }[] };
+
 export type ApiErrorBody = {
   error: { code: string; message: string; details?: unknown };
 };

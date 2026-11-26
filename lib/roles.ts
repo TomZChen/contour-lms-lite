@@ -20,6 +20,9 @@ export const ROLE_NAV: Record<AppRole, { href: string; label: string }[]> = {
     { href: "/student", label: "My consultations" },
     { href: "/student/book", label: "Book a consultation" },
   ],
-  tutor: [{ href: "/tutor", label: "My sessions" }],
+  tutor: [
+    { href: "/tutor", label: "My sessions" },
+    { href: "/tutor/availability", label: "Availability" },
+  ],
   admin: [{ href: "/admin", label: "All consultations" }],
 };

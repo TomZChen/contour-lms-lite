@@ -129,5 +129,33 @@ const none = await call("admin search 'sam example' (no match)", admin, "GET", "
 check("  no results", none.items.length === 0);
 await call("admin search rejects filter syntax", admin, "GET", "/api/admin/consultations?q=a%22%2Cid.neq.x", { expect: 400 });
 
+// Tutor availability (D46). Marcus is booked out, so removing hours conflicts.
+const sched = await call("tutor get availability", tutor, "GET", "/api/tutor/availability", { expect: 200 });
+check("  has windows and booked hours", sched.windows.length > 0 && sched.booked.length > 0);
+await call("student get availability -> 403", student, "GET", "/api/tutor/availability", { expect: 403 });
+await call("student put availability -> 403", student, "PUT", "/api/tutor/availability", { body: { windows: [] }, expect: 403 });
+await call("put overlapping windows -> 400", tutor, "PUT", "/api/tutor/availability",
+  { body: { windows: [{ weekday: 1, start: "09:00", end: "12:00" }, { weekday: 1, start: "11:00", end: "13:00" }] }, expect: 400 });
+await call("put half-hour window -> 400", tutor, "PUT", "/api/tutor/availability",
+  { body: { windows: [{ weekday: 1, start: "09:30", end: "12:00" }] }, expect: 400 });
+const conflict = await call("put removing booked hours -> 409", tutor, "PUT", "/api/tutor/availability", { body: { windows: [] }, expect: 409 });
+check("  409 lists the conflicting sessions", conflict.error?.details?.conflicts?.length > 0);
+await call("put cross-site -> 403", tutor, "PUT", "/api/tutor/availability",
+  { body: { windows: sched.windows }, headers: { "sec-fetch-site": "cross-site" }, expect: 403 });
+// Add one free hour, then restore the original week.
+const covered = (d, h) => sched.windows.some((w) => w.weekday === d && +w.start.slice(0, 2) <= h && h < +w.end.slice(0, 2));
+let extra;
+for (let d = 1; d <= 7 && !extra; d++) for (let h = 8; h < 20 && !extra; h++) if (!covered(d, h)) extra = { weekday: d, start: `${String(h).padStart(2, "0")}:00`, end: `${String(h + 1).padStart(2, "0")}:00` };
+if (extra) {
+  const added = await call("put adding an hour -> 200", tutor, "PUT", "/api/tutor/availability", { body: { windows: [...sched.windows, extra] }, expect: 200 });
+  check("  the new hour is saved", added.windows.some((w) => w.weekday === extra.weekday && w.start <= extra.start && extra.end <= w.end));
+}
+await call("put original week back -> 200", tutor, "PUT", "/api/tutor/availability", { body: { windows: sched.windows }, expect: 200 });
+
+// Date-range filter used by the calendar (D47).
+const from = new Date(Date.now() - 86_400_000).toISOString(), to = new Date(Date.now() + 7 * 86_400_000).toISOString();
+const ranged = await call("list with from/to", tutor, "GET", `/api/consultations?${new URLSearchParams({ from, to, limit: "100" })}`, { expect: 200 });
+check("  every item is inside the range", ranged.items.length > 0 && ranged.items.every((c) => new Date(c.scheduledAt) >= new Date(from) && new Date(c.scheduledAt) < new Date(to)));
+
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
 process.exit(failures ? 1 : 0);

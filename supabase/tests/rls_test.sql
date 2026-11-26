@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(38);
+select plan(47);
 
 -- ---------------------------------------------------------------------------
 -- Helpers (in a schema created inside this transaction, callable by API roles)
@@ -311,6 +311,68 @@ select throws_ok($$
   insert into public.tutor_availability (tutor_id, iso_weekday, start_time, end_time)
   values ('aaaaaaaa-0000-0000-0000-000000000011', 1, '07:00', '09:00') $$,
   '23514', null, 'availability must be within business hours 08:00-20:00');
+
+-- ---------------------------------------------------------------------------
+-- Tutors manage their own availability (D46)
+--   t3 (…13) teaches subject A; s2 books with t3 on day 9 at 10:00.
+-- ---------------------------------------------------------------------------
+insert into auth.users (id, email) values ('aaaaaaaa-0000-0000-0000-000000000013', 't3@test.local');
+update public.profiles set role = 'tutor' where id = 'aaaaaaaa-0000-0000-0000-000000000013';
+insert into public.tutor_subjects (tutor_id, subject_id)
+values ('aaaaaaaa-0000-0000-0000-000000000013', 'bbbbbbbb-0000-0000-0000-00000000000a');
+
+select test_helpers.act_as('aaaaaaaa-0000-0000-0000-000000000013');
+
+select lives_ok($$
+  select public.set_my_availability(
+    (select jsonb_agg(jsonb_build_object('weekday', d, 'start', '09:00', 'end', '12:00'))
+     from generate_series(1, 7) d)) $$,
+  'a tutor can set their weekly availability');
+
+select is(
+  (select count(*)::int from public.tutor_availability
+   where tutor_id = 'aaaaaaaa-0000-0000-0000-000000000013'),
+  7, 'the new availability replaces the old');
+
+select throws_ok($$
+  insert into public.tutor_availability (tutor_id, iso_weekday, start_time, end_time)
+  values ('aaaaaaaa-0000-0000-0000-000000000013', 1, '13:00', '14:00') $$,
+  '42501', null, 'tutors cannot write availability rows directly');
+
+select throws_ok($$
+  select public.set_my_availability('[{"weekday": 1, "start": "09:00", "end": "12:00"},
+                                      {"weekday": 1, "start": "11:00", "end": "13:00"}]') $$,
+  '23P01', null, 'overlapping windows on one day are rejected');
+
+select test_helpers.act_as('aaaaaaaa-0000-0000-0000-000000000002');
+
+select lives_ok(format($$
+  insert into public.consultations (subject_id, tutor_id, first_name, last_name, reason, scheduled_at)
+  values ('bbbbbbbb-0000-0000-0000-00000000000a',
+          'aaaaaaaa-0000-0000-0000-000000000013', 'S', 'Two', 'with t3', %L) $$,
+  test_helpers.slot(9, 10)),
+  'a student can book inside the tutor''s new hours');
+
+select throws_ok($$ select public.set_my_availability('[]') $$,
+  '42501', null, 'students cannot set availability');
+
+select test_helpers.act_as('aaaaaaaa-0000-0000-0000-000000000013');
+
+select throws_ok($$ select public.set_my_availability('[]') $$,
+  'P0001', 'availability_conflict', 'removing hours that hold a future booking is refused');
+
+select is(
+  (select count(*)::int from public.tutor_availability
+   where tutor_id = 'aaaaaaaa-0000-0000-0000-000000000013'),
+  7, 'a refused change leaves the availability untouched');
+
+select lives_ok($$
+  select public.set_my_availability(
+    (select jsonb_agg(jsonb_build_object('weekday', d, 'start', '10:00', 'end', '11:00'))
+     from generate_series(1, 7) d)) $$,
+  'removing hours without bookings is allowed');
+
+reset role;
 
 select * from finish();
 rollback;

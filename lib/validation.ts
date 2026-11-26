@@ -42,6 +42,9 @@ export const consultationStatus = z.enum(["scheduled", "completed", "cancelled"]
 
 export const listConsultationsQuery = z.strictObject({
   cursor: z.string().max(512).optional(),
+  /** Only sessions starting in [from, to), e.g. one calendar week. */
+  from: isoDateTime.optional(),
+  to: isoDateTime.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   status: consultationStatus.optional(),
   order: z.enum(["asc", "desc"]).default("asc"),
@@ -95,3 +98,38 @@ export const availabilityQuery = z
 export type AvailabilityQuery = z.infer<typeof availabilityQuery>;
 
 export const idParams = z.object({ id });
+
+// ---------------------------------------------------------------------------
+// Tutor availability (D46): weekly windows in business-local time, on the
+// hour, within business hours 08:00-20:00. The database enforces the same.
+// ---------------------------------------------------------------------------
+export const BUSINESS_OPEN_HOUR = 8;
+export const BUSINESS_CLOSE_HOUR = 20;
+
+const hourTime = z
+  .string()
+  .regex(/^\d{2}:00$/, "Use whole hours, e.g. 09:00.")
+  .refine((t) => {
+    const h = Number(t.slice(0, 2));
+    return h >= BUSINESS_OPEN_HOUR && h <= BUSINESS_CLOSE_HOUR;
+  }, `Hours must be between ${String(BUSINESS_OPEN_HOUR).padStart(2, "0")}:00 and ${BUSINESS_CLOSE_HOUR}:00.`);
+
+export const availabilityWindow = z
+  .strictObject({
+    weekday: z.number().int().min(1).max(7), // ISO: 1 = Monday
+    start: hourTime,
+    end: hourTime,
+  })
+  .refine((w) => w.start < w.end, { message: "A window must end after it starts.", path: ["end"] });
+export type AvailabilityWindow = z.infer<typeof availabilityWindow>;
+
+export const setAvailabilitySchema = z
+  .strictObject({ windows: z.array(availabilityWindow).max(7 * 12) })
+  .refine(
+    ({ windows }) =>
+      windows.every((a, i) =>
+        windows.every((b, j) => i === j || a.weekday !== b.weekday || a.end <= b.start || b.end <= a.start),
+      ),
+    { message: "Windows on the same day must not overlap.", path: ["windows"] },
+  );
+export type SetAvailabilityInput = z.infer<typeof setAvailabilitySchema>;

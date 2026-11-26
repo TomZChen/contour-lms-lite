@@ -106,6 +106,9 @@ async function listConsultations(supabase: Db, q: ListFilters): Promise<Page<Con
     query = query.or(`first_name.ilike."*${word}*",last_name.ilike."*${word}*"`);
   }
 
+  if (q.from) query = query.gte("scheduled_at", q.from);
+  if (q.to) query = query.lt("scheduled_at", q.to);
+
   if (q.status === "scheduled") query = query.is("completed_at", null).is("cancelled_at", null);
   if (q.status === "completed") query = query.not("completed_at", "is", null);
   if (q.status === "cancelled") query = query.not("cancelled_at", "is", null);
@@ -144,6 +147,34 @@ export function listMyConsultations(supabase: Db, user: CurrentUser, q: ListCons
 export function listAllConsultations(supabase: Db, user: CurrentUser, q: AdminListConsultationsQuery) {
   requireRole(user, "admin");
   return listConsultations(supabase, q);
+}
+
+/** Most sessions one calendar week shows; past that the view asks for filters. */
+export const CALENDAR_LIMIT = 500;
+
+/**
+ * One calendar week of the caller's consultations (student, tutor) or of all
+ * consultations (admin), with the same filters as the list (D47).
+ * `truncated` means more than CALENDAR_LIMIT matched.
+ */
+export async function listConsultationsForWeek(
+  supabase: Db,
+  user: CurrentUser,
+  q: AdminListConsultationsQuery,
+  range: { from: Date; to: Date },
+): Promise<{ items: ConsultationDto[]; truncated: boolean }> {
+  const query = {
+    ...q,
+    from: range.from.toISOString(),
+    to: range.to.toISOString(),
+    cursor: undefined,
+    order: "asc" as const,
+    limit: CALENDAR_LIMIT,
+  };
+  const page = user.role === "admin"
+    ? await listAllConsultations(supabase, user, query)
+    : await listMyConsultations(supabase, user, query);
+  return { items: page.items, truncated: page.nextCursor !== null };
 }
 
 /** A single consultation the caller may see (owner, its tutor, or admin). */

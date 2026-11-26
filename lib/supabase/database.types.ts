@@ -146,6 +146,9 @@ isOneToOne: false
               "slot_start": string,"tutor_id": string
             }[]
                            },
+"set_my_availability":
+{ Args: { "p_windows": Json }; Returns: undefined
+                           },
 "timemultirange":
 { Args: Record<PropertyKey, never>; Returns: unknown
                            }

@@ -106,7 +106,7 @@ The RLS `UPDATE … WITH CHECK` requires `completed_at is null or ends_at <= now
 
 ### D17. RLS is covered by pgTAP tests
 **Status:** Default · 2026-11-26
-`supabase/tests/rls_test.sql` (run with `npm run db:test`) has 38 tests. They cover access as an anonymous user, a student, a tutor and an admin; spoofing and role escalation; the column grants; the soft-cancel and completion rules; every booking rule (past, on the hour, availability, wrong subject, double booking); and the free-slots function. Security rules that only live in policies are easy to break by accident, so each rule has a test.
+`supabase/tests/rls_test.sql` (run with `npm run db:test`) has 47 tests. They cover access as an anonymous user, a student, a tutor and an admin; spoofing and role escalation; the column grants; the soft-cancel and completion rules; every booking rule (past, on the hour, availability, wrong subject, double booking); the free-slots function, and tutors setting their own availability. Security rules that only live in policies are easy to break by accident, so each rule has a test.
 
 ### D18. TypeScript types are generated from the schema
 **Status:** Default · 2026-11-26
@@ -254,7 +254,7 @@ For every route, the wrapper:
 
 ### D35. End-to-end API smoke test
 **Status:** Default · 2026-11-26
-`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 33 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination and admin filters. It complements the pgTAP tests (D17), which test the database on its own.
+`scripts/smoke-api.mjs` (run with `npm run test:api`) makes 43 checks against a running app, logged in as the seeded student, tutor and admin. It covers every route and its failure modes: 401, 403, CSRF, validation, overlaps, booking rules, pagination, admin filters and tutor availability. It complements the pgTAP tests (D17), which test the database on its own.
 
 **Not done (interview notes):** rate limiting on writes, an audit log table, and unit tests for `lib/server` with a mocked client.
 
@@ -328,7 +328,7 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
 
 ### D44. Page-level smoke test
 **Status:** Default · 2026-11-26
-`scripts/smoke-pages.mjs` (`npm run test:pages`) checks role gating (11 redirect and access cases) and the server-rendered content for each role. Browser-level checks (the client-side picker flows) weren't automated, because headless Chromium needs a system library (`libasound2`) that isn't installed on the dev machine. Playwright end-to-end tests are listed as future work.
+`scripts/smoke-pages.mjs` (`npm run test:pages`) checks role gating (12 redirect and access cases) and the server-rendered content for each role. Browser-level checks (the client-side picker flows) weren't automated, because headless Chromium needs a system library (`libasound2`) that isn't installed on the dev machine. Playwright end-to-end tests are listed as future work.
 
 ### D45. Admins can search consultations by student name
 **Status:** Decided · 2026-11-26 (requested by the user)
@@ -341,4 +341,30 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
   - *Full-text search (`tsvector`):* built for words in prose. It's poor at matching part of a name ("Sam" in "Samantha") without prefix-query tricks.
   - *Searching the account's profile name:* possible through an `!inner` embed of `profiles` on `student_id`, but it searches a name the admin doesn't see in the list. It also turns the shared list query into a join, and `profiles.full_name` would need its own trigram index.
   - *An RPC function:* more code for the same result. PostgREST filters keep it in the one shared list query.
+
+### D46. Tutors set their own weekly availability; removing booked hours is blocked
+**Status:** Decided · 2026-11-26 (user chose the weekly editor and "block the change")
+- **UI:** `/tutor/availability` is a 7-day × 08:00–20:00 grid. Click or drag to switch hours on or off, use "All day" or "Clear" per day, then save the whole week. Hours holding upcoming sessions show a lock and can't be switched off.
+- **API:** `GET /api/tutor/availability` returns `{ windows, booked }`. `PUT` takes `{ windows: [{ weekday, start, end }] }` and replaces the week. zod checks whole hours within 08:00–20:00, `start < end` and no overlaps; the database checks the same again.
+- **One write path:** `public.set_my_availability(jsonb)` (`SECURITY DEFINER`) deletes and re-inserts the caller's windows in one transaction. Tutors get no `INSERT` or `DELETE` grant on `tutor_availability`, so the PostgREST table endpoint can't be used to get round the conflict rule. Only callers whose role is tutor can use it, and only on their own rows (`auth.uid()`).
+- **Conflicts (user's choice: block):** after the replace, any upcoming scheduled session not covered by a window raises `availability_conflict` with the sessions as JSON in the error detail. That rolls back the change, and the API returns 409 with `details.conflicts`. The student's booking is never left outside the tutor's hours. The cost is that a tutor can't drop a booked hour until the student reschedules or cancels.
+- **Race with bookings:** without coordination, a student could book an hour in the instant a tutor removes it, and each transaction's check would pass. Both sides now take a per-tutor transaction-scoped advisory lock: bookings take it shared, so they don't block each other, and availability changes take it exclusive. Whichever comes second waits and then re-checks against committed data. This was verified with two live sessions: the booking waited for the change, then failed with `tutor_unavailable`. Advisory locks were chosen over `SELECT … FOR SHARE`, which needs `UPDATE` privilege on the table.
+- **Error mapping:** a window-overlap exclusion violation (`tutor_availability_no_overlap`) maps to 422 `validation_failed`, not the booking `slot_taken`.
+- **Rejected:**
+  - *Per-window CRUD:* a grid edit would become many calls, with partial failures.
+  - *Auto-cancelling affected sessions:* destroys student data without a notification system.
+  - *Keep-and-warn:* simpler, but leaves bookings outside the tutor's stated hours.
+  - *Date-specific time off:* left as future work.
+
+### D47. Week calendar view for every role, custom-built
+**Status:** Decided · 2026-11-26 (user chose "all roles, week view" and "custom with Tailwind")
+- **Where:** `/student`, `/tutor` and `/admin` have a **List | Calendar** toggle (`?view=calendar&week=YYYY-MM-DD`; any day is normalised to its Monday, and invalid values fall back to this week). The status tabs and admin filters apply to both views, as in D41.
+- **Data:** `listConsultationsForWeek()` reuses the list query with a `[from, to)` range on `scheduled_at`, capped at 500 sessions. Past that it says "narrow it down with filters". The same `from`/`to` filter is exposed on both list APIs. The week is rendered on the server, and prev, next and "This week" are links.
+- **Layout:** Monday–Sunday × business hours. Every session is 60 minutes on the hour, so each sits in exactly one cell, with no overlap layout needed. A cell shows up to 2 sessions, then "+n more" opens a dialog. Chips are coloured by status. Clicking one opens its details, and for students the existing complete, reschedule and cancel actions, which refresh the week afterwards.
+- **Time zone:** `lib/calendar.ts` does the Melbourne-time maths with `Intl` only: date keys, Monday of the week, and the instant of local midnight, including weeks with daylight-saving changes. It's checked against both 2026 DST transitions. "Today" is computed on the server and passed down, so server and client renders match.
+- **Shared view:** a `ConsultationsView` server component now holds the filters, tabs and the list-or-calendar switch for all three pages.
+- **Rejected:**
+  - *FullCalendar:* heavy and client-only, its styling clashes with shadcn/ui, and the time zone needs a plugin.
+  - *react-big-calendar:* needs a date-library localizer and extra work to show Melbourne time on any device.
+  - *A month view:* not needed with one-hour sessions; left as future work.
 

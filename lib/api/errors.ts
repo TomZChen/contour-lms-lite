@@ -22,6 +22,7 @@ export type ApiErrorCode =
   | "consultation_cancelled"
   | "consultation_completed"
   | "consultation_not_ended"
+  | "availability_conflict"
   | "internal_error";
 
 export class ApiError extends Error {
@@ -52,11 +53,29 @@ const BOOKING_RULE_ERRORS: Record<string, [ApiErrorCode, string]> = {
 export function fromPostgrestError(error: PostgrestError): ApiError {
   switch (error.code) {
     case "P0001": {
+      if (error.message === "availability_conflict") {
+        // set_my_availability() lists the sessions in the way as JSON (D46).
+        let conflicts: unknown = [];
+        try {
+          conflicts = JSON.parse(error.details ?? "[]");
+        } catch {
+          /* keep [] */
+        }
+        return new ApiError(
+          409,
+          "availability_conflict",
+          "Some of the hours you removed have upcoming sessions. Keep those hours until the students reschedule or cancel.",
+          { conflicts },
+        );
+      }
       const known = BOOKING_RULE_ERRORS[error.message];
       if (known) return new ApiError(422, known[0], known[1]);
       break;
     }
-    case "23P01": // exclusion constraint: overlapping booking
+    case "23P01": // exclusion constraint: overlapping booking (or availability window)
+      if (error.message.includes("tutor_availability_no_overlap")) {
+        return new ApiError(422, "validation_failed", "Availability windows on the same day must not overlap.");
+      }
       return new ApiError(
         409,
         "slot_taken",

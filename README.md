@@ -10,6 +10,8 @@ A mini-LMS where students book 60-minute consultations with subject tutors, then
 - **Availability:** tutors with no free slots are flagged **Booked out**, and other tutors for the same subject are recommended.
 - **Double-booking prevention:** the database stops a tutor or a student being booked twice for the same time, even when requests arrive at the same moment.
 - **Admin view:** every consultation, read-only, with student-name search, filters and cursor pagination.
+- **Tutor availability:** tutors set their weekly hours on a click-and-drag grid. Hours that hold upcoming sessions can't be removed.
+- **Calendar view:** every role can switch between the list and a Monday–Sunday week calendar of sessions.
 
 ---
 
@@ -24,7 +26,7 @@ A mini-LMS where students book 60-minute consultations with subject tutors, then
 7. [Known limitations & future work](#known-limitations--future-work)
 8. [AI usage](#ai-usage)
 
-The full decision log (45 decisions with reasoning and rejected alternatives) is in [`docs/DECISIONS.md`](docs/DECISIONS.md). Each `Dnn` reference below points there.
+The full decision log (47 decisions with reasoning and rejected alternatives) is in [`docs/DECISIONS.md`](docs/DECISIONS.md). Each `Dnn` reference below points there.
 
 ---
 
@@ -88,13 +90,15 @@ Every account's password is `password123`.
 1. Log in as `student@example.com`, then go to **Book a consultation** and choose **Specialist Math**.
 2. Click **Marcus Lindqvist**. He's marked *Booked out*, and **Chloe Nguyen** is recommended with her next free time. Switch to her, pick a slot, fill in your details, and book.
 3. Back on **My consultations**, reschedule it, cancel it, or open the **Completed** tab and toggle *Done*.
-4. Log in as Marcus to see his read-only sessions, or as the admin to see and filter everything.
+4. Switch any list to **Calendar** to see the week laid out by day and hour.
+5. Log in as Marcus to see his sessions, then open **Availability**. His booked hours are locked; try removing a free hour or adding a new one.
+6. Log in as the admin to see, search and filter everything.
 
 New sign-ups are always students. Admins and tutors are created out of band (D13). In production, run:
 
 ```sql
 update public.profiles set role = 'admin' where id = '<auth user id>';
--- tutor: set role = 'tutor', then add rows to tutor_subjects and tutor_availability
+-- tutor: set role = 'tutor' and add rows to tutor_subjects; the tutor then sets their own hours at /tutor/availability
 ```
 
 ### Deploying to a hosted Supabase project (not exercised in this repo)
@@ -165,9 +169,11 @@ Server Components (pages) ─────────────►  Service la
 | `/student` | student | Status tabs; *Done* checkbox, **Reschedule** dialog and **Cancel** confirmation per row |
 | `/student/book` | student | Subject → tutor (booked-out badges + recommendations) → slot grid → your details |
 | `/tutor` | tutor | Sessions booked with you (read-only) |
+| `/tutor/availability` | tutor | Weekly availability grid: click or drag hours on or off, then save (D46) |
 | `/admin` | admin | Every consultation; student-name search, subject, tutor, status and sort filters (read-only) |
 
 - The first page of each list is rendered on the server. Filters live in the URL, and "Load more" uses the API's cursor (D41).
+- `/student`, `/tutor` and `/admin` each have a **List | Calendar** toggle (`?view=calendar&week=YYYY-MM-DD`). The week calendar applies the same status and admin filters, and clicking a session shows its details. For students, it also shows the usual actions (D47).
 - Times are always shown in Melbourne time, labelled AEST/AEDT (D42).
 
 ### API
@@ -179,7 +185,7 @@ Every endpoint needs a session and otherwise returns a JSON 401. Responses are J
 | GET | `/api/me` | any | Current user and role |
 | GET | `/api/subjects` | any | Subjects with their tutors |
 | GET | `/api/subjects/:id/availability?from&to&tutorId&at` | any | Free slots per tutor (default 14 days, max 31), `bookedOut` flags, `recommendations` |
-| GET | `/api/consultations?cursor&limit&status&order` | student, tutor | A student's bookings, or a tutor's sessions |
+| GET | `/api/consultations?cursor&limit&status&order&from&to` | student, tutor | A student's bookings, or a tutor's sessions; `from`/`to` limit it to a date range |
 | POST | `/api/consultations` | student | Book: `{ firstName, lastName, reason, scheduledAt, subjectId, tutorId }`. Returns 201 with a `Location` header |
 | GET | `/api/consultations/:id` | the student, the tutor, admin | One consultation |
 | POST | `/api/consultations/:id/reschedule` | the student | `{ scheduledAt, tutorId? }` |
@@ -187,6 +193,8 @@ Every endpoint needs a session and otherwise returns a JSON 401. Responses are J
 | DELETE | `/api/consultations/:id/completion` | the student | Mark incomplete |
 | POST | `/api/consultations/:id/cancel` | the student | Soft cancel |
 | GET | `/api/admin/consultations?…&q&studentId&tutorId&subjectId` | admin | Every consultation; `q` searches the student's name (D45) |
+| GET | `/api/tutor/availability` | tutor | Your weekly windows, plus the weekly hours that hold upcoming sessions |
+| PUT | `/api/tutor/availability` | tutor | Replace your week: `{ windows: [{ weekday, start, end }] }`. 409 `availability_conflict` lists the sessions in the way (D46) |
 
 **Design (D28–D33)**
 - **Action endpoints:** each change has its own endpoint with a narrow, strict body, so actions can't be smuggled into one generic `PATCH`. Completion is a sub-resource, so `PUT` and `DELETE` are both idempotent.
@@ -197,6 +205,7 @@ Every endpoint needs a session and otherwise returns a JSON 401. Responses are J
   | --- | --- |
   | `23P01` (overlap) | 409 `slot_taken` |
   | Booking-rule trigger errors | 422 (`slot_in_past`, `slot_not_on_the_hour`, `tutor_unavailable`) |
+  | `availability_conflict` from `set_my_availability()` | 409, with the conflicting sessions in `details` |
   | RLS or privilege denial | 403 |
   | Missing row, or hidden by RLS | 404 |
 
@@ -210,18 +219,19 @@ Every endpoint needs a session and otherwise returns a JSON 401. Responses are J
 | `app/api/**/route.ts` | Thin handlers: parse → service → JSON |
 | `lib/api/route.ts` | `authedRoute()`: session, CSRF, zod parsing, error responses |
 | `lib/api/errors.ts` | Error codes and database-error mapping |
-| `lib/server/*.ts` | Service layer (`server-only`): consultations, subjects, auth, list params |
+| `lib/server/*.ts` | Service layer (`server-only`): consultations, subjects, availability, auth, list params |
+| `lib/calendar.ts` | Melbourne-time week and hour maths for the calendar and availability grid |
 | `lib/validation.ts` | Zod schemas shared by the API and the forms |
 | `lib/dto.ts` / `lib/api-client.ts` | Response types / browser fetch wrapper with friendly error messages |
-| `components/*` | App shell and role gate, consultation list and actions, availability picker, booking form |
+| `components/*` | App shell and role gate, consultation list, week calendar, actions, availability picker and editor, booking form |
 
 ### Booking and availability
 
-- **Tutor schedules:** each tutor has weekly availability windows, all within 08:00–20:00 Melbourne time, any day (D20, D22).
+- **Tutor schedules:** each tutor has weekly availability windows, all within 08:00–20:00 Melbourne time, any day (D20, D22). Tutors edit them through `public.set_my_availability()`, which replaces the week in one transaction. It refuses to remove an hour that holds an upcoming session (D46).
 - **Slots:** consultations last 60 minutes and start on the hour. `ends_at` is always calculated by a trigger (D22).
 - **Free slots:** `public.get_free_slots(subject, from, to)` expands the windows into slots and removes booked ones. It returns only `(tutor_id, slot_start)` pairs, so students learn which slots are taken without seeing anyone else's bookings (D25).
 - **Booked out and recommendations:** a tutor is booked out when they have no free slot in the window. The API then recommends other tutors for the same subject, preferring those free at the requested time, then whoever is free soonest.
-- **Concurrency:** two students can't both win the same slot. The exclusion constraint decides atomically, and the loser gets a 409. The UI then shows "slot just taken" and reloads availability.
+- **Concurrency:** two students can't both win the same slot. The exclusion constraint decides atomically, and the loser gets a 409. The UI then shows "slot just taken" and reloads availability. A booking and a tutor's availability change are serialised by a per-tutor advisory lock, so a student can't book into an hour that's being removed at the same moment (D46).
 
 ### Security measures
 
@@ -251,6 +261,7 @@ Migrations live in `supabase/migrations/` and are applied in order. Applied migr
 | `20261126100100_tutors_subjects_availability.sql` | `subjects`, `tutor_subjects`, `tutor_availability`; consultation subject, tutor and end time; exclusion constraints; booking trigger; three-role policies; `get_free_slots()` |
 | `20261126110000_consultations_direct_fks.sql` | Direct FKs so PostgREST can embed tutor and subject in responses (D34) |
 | `20261126120000_consultation_name_search.sql` | `pg_trgm` and trigram GIN indexes on `first_name` and `last_name` for the admin name search (D45) |
+| `20261126130000_tutor_manages_availability.sql` | `set_my_availability()`, the per-tutor advisory lock, and the booking trigger taking that lock (D46) |
 
 ```
 auth.users ─1:1─ profiles (role: student | tutor | admin, full_name)
@@ -294,6 +305,8 @@ auth.users ─1:1─ profiles (role: student | tutor | admin, full_name)
 | `private.assert_profile_is_tutor()` | trigger | Only tutors can be linked to subjects or have availability |
 | `private.business_timezone()`, `private.slot_duration()` | immutable | Single source for `Australia/Melbourne` and 60 minutes |
 | `public.get_free_slots(subject, from, to)` | `SECURITY DEFINER` RPC | Free slots for `authenticated` users only; window capped at 31 days |
+| `public.set_my_availability(windows)` | `SECURITY DEFINER` RPC | The only way to change availability: tutors only, their own week, atomic, refuses to strand booked sessions |
+| `private.lock_tutor_availability(tutor, exclusive)` | function | Per-tutor advisory lock shared by bookings and availability changes |
 | `public.timerange` | range type | Lets an exclusion constraint stop a tutor's availability windows overlapping |
 
 **Seed (`supabase/seed.sql`, local only):** 3 demo users, 6 subjects, and 15 tutors with random weekly availability generated from a fixed seed, so it's identical after every reset. It also books Marcus Lindqvist solid for 14 days and adds a few of Sam's consultations. Historic (past) rows are inserted with the booking trigger explicitly disabled for that one statement.
@@ -323,11 +336,11 @@ auth.users ─1:1─ profiles (role: student | tutor | admin, full_name)
 - **Scope extension.** Tutors, subjects and availability go beyond the brief, which says the form "doesn't need to store information beyond" the four fields. They were added to support "booked out" and recommendations (D19–D27). The four required fields are still collected and stored as specified.
 - **Names are stored on the consultation** exactly as entered. They're prefilled from the profile when known and aren't copied back to it (D9).
 - **Time:** consultations last 60 minutes and start on the hour. Everyone is in Melbourne, so all times are stored in UTC and shown in Australia/Melbourne time (D22, D42).
-- **Tutor hours:** tutors work recurring weekly windows within 08:00–20:00, any day. There are no one-off exceptions such as leave, and tutors don't manage their own hours yet (D20).
+- **Tutor hours:** tutors work recurring weekly windows within 08:00–20:00, any day. Tutors set their own hours (D46). There are no one-off exceptions such as leave (D20).
 - **Completion:** a consultation can only be marked complete after it has ended (D16).
 - **Completed versus cancelled:** a completed consultation can't be cancelled without first being marked incomplete, and a cancelled one is final (D15, D8).
 - **Rescheduling** may switch to another tutor of the same subject, but never to another subject (D26).
-- **Admin and tutor views are read-only**, and only students book (D14).
+- **Admin and tutor views of consultations are read-only**, and only students book (D14). Tutors can change only their own availability.
 - **Admins and tutors are provisioned out of band.** No API grants roles (D13).
 - **Session checks:** `getClaims()` verifies the JWT locally, so a revoked session stays valid until its token expires, one hour by default. PostgREST applies the same rule. Use `getUser()` if immediate revocation is needed (D32).
 
@@ -347,9 +360,9 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 
 | Suite | Command | Covers |
 | ----- | ------- | ------ |
-| pgTAP | `npm run db:test` | 38 tests (see below) |
-| API smoke | `npm run test:api` | 33 HTTP calls as the seeded student, tutor and admin (see below) |
-| Page smoke | `npm run test:pages` | 19 checks of role redirects and server-rendered content per role |
+| pgTAP | `npm run db:test` | 47 tests (see below) |
+| API smoke | `npm run test:api` | 43 HTTP calls as the seeded student, tutor and admin (see below) |
+| Page smoke | `npm run test:pages` | 25 checks of role redirects and server-rendered content per role |
 | Static | `npm run lint && npm run typecheck && npm run build` | ESLint, TypeScript, and the production build, including Cache Components checks |
 
 **pgTAP (`npm run db:test`)** covers:
@@ -359,7 +372,8 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 - every booking rule;
 - overlaps;
 - the soft-cancel and completion rules;
-- `get_free_slots`.
+- `get_free_slots`;
+- tutors setting availability: no direct writes, overlap rejected, and booked hours refused with the week left untouched.
 
 **API smoke (`npm run test:api`)** covers every route plus:
 - 401 without a session, and 403 for the wrong role;
@@ -367,7 +381,9 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 - validation errors;
 - overlapping bookings and booking-rule errors;
 - pagination and tampered cursors;
-- admin filters and student-name search, including input that tries to inject filter syntax.
+- admin filters and student-name search, including input that tries to inject filter syntax;
+- tutor availability: role checks, validation, the 409 conflict, CSRF, and a save-and-restore round trip;
+- the `from`/`to` date range used by the calendar.
 
 The API and page smoke tests need a running app (`npm run dev`) on a freshly reset database (`npm run db:reset`). The API test leaves a cancelled booking behind, so reset again for a clean slate.
 
@@ -379,7 +395,7 @@ The API and page smoke tests need a running app (`npm run dev`) on a freshly res
 - **Unit tests:** the service layer and the error mapping have none; they're covered by the smoke and pgTAP suites.
 - **Rate limiting** on writes and auth endpoints.
 - **Audit log:** a table of who changed what, for example rescheduling history.
-- **Scheduling features:** tutors managing their own availability, leave and exceptions, and variable session lengths.
+- **Scheduling features:** leave and one-off exceptions, and variable session lengths. Notifying students when a tutor's hours change.
 - **Notifications:** confirmation and reminder emails, and calendar (ICS) invites.
 - **Admin tools:** user and role management, and writes with an audit trail.
 - **Time zones:** a timezone per user or tutor, in place of one business timezone.

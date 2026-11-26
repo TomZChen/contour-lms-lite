@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search } from "lucide-react";
+import { CalendarDays, List, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SubjectDto } from "@/lib/dto";
@@ -21,7 +21,7 @@ export function StatusTabs({ current }: { current: string }) {
   const pathname = usePathname();
   const params = useSearchParams();
   return (
-    <div className="bg-muted text-muted-foreground mb-4 inline-flex rounded-md p-1 text-sm" role="tablist">
+    <div className="bg-muted text-muted-foreground inline-flex rounded-md p-1 text-sm" role="tablist">
       {STATUS_TABS.map((t) => {
         const next = new URLSearchParams(params);
         next.set("status", t.value);
@@ -40,6 +40,39 @@ export function StatusTabs({ current }: { current: string }) {
           </Link>
         );
       })}
+    </div>
+  );
+}
+
+/** List | Calendar switch (D47), kept in the URL like the other filters. */
+export function ViewToggle({ current }: { current: "list" | "calendar" }) {
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const href = (view: "list" | "calendar") => {
+    const next = new URLSearchParams(params);
+    if (view === "list") {
+      next.delete("view");
+      next.delete("week");
+    } else next.set("view", view);
+    return `${pathname}?${next}`;
+  };
+  return (
+    <div className="bg-muted text-muted-foreground inline-flex rounded-md p-1 text-sm" role="tablist" aria-label="View">
+      {(["list", "calendar"] as const).map((v) => (
+        <Link
+          key={v}
+          href={href(v)}
+          role="tab"
+          aria-selected={current === v}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 font-medium transition-colors",
+            current === v ? "bg-background text-foreground shadow-sm" : "hover:text-foreground",
+          )}
+        >
+          {v === "list" ? <List className="size-4" /> : <CalendarDays className="size-4" />}
+          {v === "list" ? "List" : "Calendar"}
+        </Link>
+      ))}
     </div>
   );
 }
