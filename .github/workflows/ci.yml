@@ -70,7 +70,7 @@ jobs:
       - name: Start the app
         run: |
           npm run start -- -p 3000 > next.log 2>&1 &
-          for i in $(seq 60); do curl -fsS -o /dev/null http://localhost:3000 && exit 0; sleep 1; done
+          for i in $(seq 60); do curl -fs -o /dev/null http://localhost:3000 && exit 0; sleep 1; done
           echo "App did not start"; cat next.log; exit 1
 
       # Pages first: it only reads, and expects the seed untouched. The API
