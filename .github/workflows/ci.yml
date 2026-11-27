@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast checks that need no database.
+  checks:
+    name: Lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Build-time placeholders: pages are dynamic, so nothing connects at build.
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Real Postgres + Auth + PostgREST via the Supabase CLI, then the app on top.
+  integration:
+    name: Database tests and API/page smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Start local Supabase (migrations + seed)
+        # Only the services the app uses: Postgres, Auth, PostgREST, Kong, and
+        # postgres-meta (for type generation).
+        run: npx supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit
+
+      - name: pgTAP (RLS, grants, booking and availability rules)
+        run: npm run db:test
+
+      - name: Generated types match the migrations
+        run: |
+          npm run db:types
+          git diff --exit-code lib/supabase/database.types.ts
+
+      - name: Point the app at the local stack
+        run: |
+          eval "$(npx supabase status -o env 2>/dev/null | grep -E '^(API_URL|PUBLISHABLE_KEY)=')"
+          printf 'NEXT_PUBLIC_SUPABASE_URL=%s\nNEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=%s\n' "$API_URL" "$PUBLISHABLE_KEY" > .env.local
+
+      - run: npm run build
+
+      - name: Start the app
+        run: |
+          npm run start -- -p 3000 > next.log 2>&1 &
+          for i in $(seq 60); do curl -fsS -o /dev/null http://localhost:3000 && exit 0; sleep 1; done
+          echo "App did not start"; cat next.log; exit 1
+
+      # Pages first: it only reads, and expects the seed untouched. The API
+      # test then books, reschedules and cancels.
+      - run: npm run test:pages
+      - run: npm run test:api
+
+      - name: App log
+        if: failure()
+        run: cat next.log || true
+
+      - name: Stop Supabase
+        if: always()
+        run: npx supabase stop --no-backup

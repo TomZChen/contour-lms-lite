@@ -5,47 +5,12 @@ import { Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { apiFetch, ApiClientError } from "@/lib/api-client";
-import type { AvailabilityConflictDetails, AvailabilityWindowDto, TutorScheduleDto } from "@/lib/dto";
+import { HOURS, WEEKDAYS, cellKey, cellsToWindows, sameCells, windowsToCells } from "@/lib/availability-grid";
+import type { AvailabilityConflictDetails, TutorScheduleDto } from "@/lib/dto";
 import { formatDateTime } from "@/lib/format";
-import { BUSINESS_CLOSE_HOUR, BUSINESS_OPEN_HOUR } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
-const WEEKDAYS = [
-  [1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"],
-] as const;
-const HOURS = Array.from({ length: BUSINESS_CLOSE_HOUR - BUSINESS_OPEN_HOUR }, (_, i) => BUSINESS_OPEN_HOUR + i);
-
-/** A cell is one bookable hour of the week: "weekday-hour". */
-const cellKey = (weekday: number, hour: number) => `${weekday}-${hour}`;
-const pad = (h: number) => `${String(h).padStart(2, "0")}:00`;
 const hourLabel = (h: number) => `${h % 12 || 12} ${h < 12 ? "am" : "pm"}`;
-
-function windowsToCells(windows: AvailabilityWindowDto[]): Set<string> {
-  const cells = new Set<string>();
-  for (const w of windows) {
-    for (let h = Number(w.start.slice(0, 2)); h < Number(w.end.slice(0, 2)); h++) cells.add(cellKey(w.weekday, h));
-  }
-  return cells;
-}
-
-/** Merge each day's switched-on hours into contiguous windows. */
-function cellsToWindows(cells: Set<string>): AvailabilityWindowDto[] {
-  const windows: AvailabilityWindowDto[] = [];
-  for (const [weekday] of WEEKDAYS) {
-    let start: number | null = null;
-    for (const h of [...HOURS, BUSINESS_CLOSE_HOUR]) {
-      const on = h < BUSINESS_CLOSE_HOUR && cells.has(cellKey(weekday, h));
-      if (on && start === null) start = h;
-      if (!on && start !== null) {
-        windows.push({ weekday, start: pad(start), end: pad(h) });
-        start = null;
-      }
-    }
-  }
-  return windows;
-}
-
-const sameCells = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
 
 /**
  * Weekly availability grid (D46). Click or drag across hours to switch them on
