@@ -1,5 +1,7 @@
 # Contour LMS Lite
 
+[![CI](https://github.com/TomZChen/contour-lms-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/TomZChen/contour-lms-lite/actions/workflows/ci.yml)
+
 A mini-LMS where students book 60-minute consultations with subject tutors, then mark them complete, reschedule or cancel them. Tutors see the sessions booked with them, and admins see every consultation in the system.
 
 **Features**
@@ -26,7 +28,7 @@ A mini-LMS where students book 60-minute consultations with subject tutors, then
 7. [Known limitations & future work](#known-limitations--future-work)
 8. [AI usage](#ai-usage)
 
-The full decision log (47 decisions with reasoning and rejected alternatives) is in [`docs/DECISIONS.md`](docs/DECISIONS.md). Each `Dnn` reference below points there.
+The full decision log (48 decisions with reasoning and rejected alternatives) is in [`docs/DECISIONS.md`](docs/DECISIONS.md). Each `Dnn` reference below points there.
 
 ---
 
@@ -48,7 +50,7 @@ The full decision log (47 decisions with reasoning and rejected alternatives) is
 
 ### Prerequisites
 
-- Node.js 20+ (developed on Node 22)
+- Node.js 22 (see `.nvmrc`)
 - Docker, running, for the local Supabase stack
 
 The Supabase CLI is a pinned dev dependency, so `npm install` provides it and nothing needs to be installed globally (D3).
@@ -122,6 +124,7 @@ Then:
 | `npm run db:start` / `db:stop` | Start or stop local Supabase |
 | `npm run db:reset` | Recreate the local DB from migrations + seed |
 | `npm run db:types` | Regenerate `lib/supabase/database.types.ts` from the schema |
+| `npm test` | Vitest unit tests (no database or app needed) |
 | `npm run db:test` | pgTAP tests for RLS, privileges and booking rules |
 | `npm run test:api` | End-to-end API smoke test (needs a running app; `BASE=` to override the URL) |
 | `npm run test:pages` | Page role-gating and server-rendering smoke test (needs a running app) |
@@ -360,6 +363,7 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 
 | Suite | Command | Covers |
 | ----- | ------- | ------ |
+| Unit (Vitest) | `npm test` | 70 tests of pure logic: Melbourne calendar and DST maths, the availability grid, the shared zod schemas (including filter-injection input) and database-error mapping. They run with `TZ=America/Los_Angeles`, so they only pass if the code uses Melbourne time explicitly |
 | pgTAP | `npm run db:test` | 47 tests (see below) |
 | API smoke | `npm run test:api` | 43 HTTP calls as the seeded student, tutor and admin (see below) |
 | Page smoke | `npm run test:pages` | 25 checks of role redirects and server-rendered content per role |
@@ -386,6 +390,10 @@ Run `git diff bddeb1f -- <path>` to compare any file with the original template.
 - the `from`/`to` date range used by the calendar.
 
 The API and page smoke tests need a running app (`npm run dev`) on a freshly reset database (`npm run db:reset`). The API test leaves a cancelled booking behind, so reset again for a clean slate.
+
+**CI (`.github/workflows/ci.yml`)** runs on every push and pull request, in two jobs (D48):
+1. **Checks:** lint, typecheck, unit tests, production build.
+2. **Integration:** starts Supabase with the CLI (migrations and seed), runs pgTAP, fails if `database.types.ts` no longer matches the schema, then builds and starts the app and runs the page and API smoke tests against it.
 
 ---
 

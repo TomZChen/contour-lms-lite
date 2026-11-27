@@ -368,3 +368,15 @@ This template enables `cacheComponents`. During the build, `cookies()` rejects o
   - *react-big-calendar:* needs a date-library localizer and extra work to show Melbourne time on any device.
   - *A month view:* not needed with one-hour sessions; left as future work.
 
+### D48. Vitest for pure logic; GitHub Actions CI runs every suite
+**Status:** Decided · 2026-11-27
+- **Vitest** covers the code that is pure and easy to get subtly wrong: Melbourne-time calendar maths (both DST transitions), the availability grid ↔ windows conversion, the shared zod schemas and error mapping. The tests run under `TZ=America/Los_Angeles`, so code that accidentally uses the machine's time zone fails. The grid conversion was moved out of the editor component into `lib/availability-grid.ts` so it can be tested. A deliberately broken DST correction made 3 tests fail, which shows they catch real bugs.
+- **Not unit-tested:** route handlers and the service layer. They are thin over the database, and the pgTAP and smoke tests exercise them against real Postgres. Mocking Supabase would mostly test the mocks.
+- **CI** has two jobs. The fast **checks** job (lint, typecheck, unit, build) uses placeholder env vars, since nothing connects to Supabase at build time. The **integration** job starts the real stack with the pinned Supabase CLI, leaving out services the app doesn't use (storage, realtime, studio, mail, etc.). It runs pgTAP and a check that the generated types still match the migrations, then the page and API smoke tests against a production build. The page test runs before the API test because it expects the seed untouched.
+- **Supply chain:** the workflow has read-only `contents` permission and runs no unpinned `npx --yes` downloads; the start-up wait is a plain `curl` loop.
+- `@types/node` moved from 20 to 22 to match the runtime (`.nvmrc`), which Vitest 5 also requires.
+- **Rejected:**
+  - *Jest:* slower, and needs extra setup for TypeScript and ESM.
+  - *Mocked-Supabase unit tests of routes:* low value, as above.
+  - *Running Playwright in CI now:* still future work (D44).
+
